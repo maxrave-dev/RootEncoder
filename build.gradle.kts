@@ -8,7 +8,7 @@ allprojects {
         pom {
           name = "RootEncoder"
           description = "A stream encoder to push video/audio to media servers"
-          url = "https://github.com/pedroSG94/RootEncoder"
+          url = "https://github.com/maxrave-dev/RootEncoder"
           licenses {
             license {
               name = "Apache-2.0"
