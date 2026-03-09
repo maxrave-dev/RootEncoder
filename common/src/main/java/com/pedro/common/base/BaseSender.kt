@@ -40,24 +40,67 @@ abstract class BaseSender(
     protected val bytesSend = AtomicLong(0)
     protected val bytesSendPerSecond = AtomicLong(0)
 
+    // Timestamp offset management: reset timestamps to ~0 on reconnect
+    // because a new connection is a new server-side session
+    @Volatile
+    private var videoTsOffset = 0L
+    @Volatile
+    private var audioTsOffset = 0L
+    @Volatile
+    private var pendingVideoTsReset = false
+    @Volatile
+    private var pendingAudioTsReset = false
+
     abstract fun setVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?)
     abstract fun setAudioInfo(sampleRate: Int, isStereo: Boolean)
     protected abstract suspend fun onRun()
     protected abstract suspend fun stopImp(clear: Boolean = true)
 
     fun sendMediaFrame(mediaFrame: MediaFrame) {
-        if (running && !queue.trySend(mediaFrame)) {
-            when (mediaFrame.type) {
-                MediaFrame.Type.VIDEO -> {
-                    Log.i(TAG, "Video frame discarded")
-                    droppedVideoFrames.incrementAndGet()
-                }
-                MediaFrame.Type.AUDIO -> {
-                    Log.i(TAG, "Audio frame discarded")
-                    droppedAudioFrames.incrementAndGet()
+        if (running) {
+            val adjustedFrame = adjustTimestamp(mediaFrame)
+            if (!queue.trySend(adjustedFrame)) {
+                when (mediaFrame.type) {
+                    MediaFrame.Type.VIDEO -> {
+                        Log.i(TAG, "Video frame discarded")
+                        droppedVideoFrames.incrementAndGet()
+                    }
+                    MediaFrame.Type.AUDIO -> {
+                        Log.i(TAG, "Audio frame discarded")
+                        droppedAudioFrames.incrementAndGet()
+                    }
                 }
             }
         }
+    }
+
+    private fun adjustTimestamp(mediaFrame: MediaFrame): MediaFrame {
+        val rawTs = mediaFrame.info.timestamp
+        val adjustedTs: Long
+
+        when (mediaFrame.type) {
+            MediaFrame.Type.VIDEO -> {
+                if (pendingVideoTsReset) {
+                    videoTsOffset = rawTs
+                    pendingVideoTsReset = false
+                }
+                adjustedTs = rawTs - videoTsOffset
+            }
+            MediaFrame.Type.AUDIO -> {
+                if (pendingAudioTsReset) {
+                    audioTsOffset = rawTs
+                    pendingAudioTsReset = false
+                }
+                adjustedTs = rawTs - audioTsOffset
+            }
+        }
+
+        if (adjustedTs == rawTs) return mediaFrame
+        return MediaFrame(
+            mediaFrame.data,
+            MediaFrame.Info(mediaFrame.info.offset, mediaFrame.info.size, adjustedTs, mediaFrame.info.isKeyFrame),
+            mediaFrame.type
+        )
     }
 
     fun start() {
@@ -80,6 +123,15 @@ abstract class BaseSender(
     suspend fun stop(clear: Boolean = true) {
         running = false
         stopImp(clear)
+        if (clear) {
+            videoTsOffset = 0
+            audioTsOffset = 0
+            pendingVideoTsReset = false
+            pendingAudioTsReset = false
+        } else {
+            pendingVideoTsReset = true
+            pendingAudioTsReset = true
+        }
         resetSentAudioFrames()
         resetSentVideoFrames()
         resetDroppedAudioFrames()

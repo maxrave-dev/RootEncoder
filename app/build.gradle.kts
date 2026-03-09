@@ -9,7 +9,7 @@ android {
 
   defaultConfig {
     applicationId = "com.pedro.streamer"
-    minSdk = 16
+    minSdk = 21
     targetSdk = 36
     versionCode = project.version.toString().replace(".", "").toInt()
     versionName = project.version.toString()

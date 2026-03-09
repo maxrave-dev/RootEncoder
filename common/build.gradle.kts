@@ -10,7 +10,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 16
+        minSdk = 21
         lint.targetSdk = 36
     }
 
